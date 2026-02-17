@@ -8,53 +8,38 @@ import time
 # 1. CONFIGURACIÓN DE LA PÁGINA
 # -------------------------------------------------
 st.set_page_config(
-    page_title="Clemont Stock Manager",
+    page_title="Clemont Stock Manager Pro",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Estilos CSS personalizados para mejorar la apariencia
+# Estilos CSS
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8f9fa;
-    }
+    .main { background-color: #f4f6f9; }
     .stButton>button {
-        width: 100%;
-        background-color: #000000;
-        color: white;
-        border-radius: 5px;
-        height: 50px;
-        font-weight: bold;
+        width: 100%; border-radius: 8px; height: 55px; font-weight: bold;
+        background-color: #0f172a; color: white; border: none;
     }
-    .stButton>button:hover {
-        background-color: #333333;
-        color: white;
-        border: none;
+    .stButton>button:hover { background-color: #334155; color: white; }
+    .metric-container {
+        background-color: white; padding: 15px; border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center;
     }
-    .metric-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        text-align: center;
-    }
-    h1 { color: #1a1a1a; }
-    h3 { color: #333333; }
+    div[data-testid="stMetricValue"] { font-size: 24px; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📦 Clemont Stock Manager")
-st.caption("Herramienta de sincronización de inventario: CEDI ➡️ Matrixify (Shopify)")
-st.markdown("---")
+st.title("📦 Clemont Stock Manager Pro")
+st.caption("Auditoría y Sincronización: CEDI ➡️ Matrixify")
 
 # -------------------------------------------------
 # 2. FUNCIONES DE CARGA INTELIGENTE
 # -------------------------------------------------
 def cargar_cedi_inteligente(file, columna_clave="Código Producto"):
-    """Busca la fila que contiene 'Código Producto' para usarla como encabezado."""
     try:
+        # Lee primeras 20 filas para buscar encabezado
         df_preview = pd.read_excel(file, engine="openpyxl", header=None, nrows=20)
         fila_header = None
         for i, row in df_preview.iterrows():
@@ -68,164 +53,228 @@ def cargar_cedi_inteligente(file, columna_clave="Código Producto"):
             return pd.read_excel(file, engine="openpyxl", header=fila_header)
         else:
             return pd.read_excel(file, engine="openpyxl")
-    except Exception as e:
+    except Exception:
         return None
 
 # -------------------------------------------------
-# 3. INTERFAZ DE CARGA (PASOS 1 y 2)
+# 3. INTERFAZ DE CARGA
 # -------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
-    # INTENTA CARGAR ICONO SI EXISTE, SI NO USA EMOJI
-    # st.image("shopify_icon.svg", width=50) # Descomentar si tienes el archivo
-    st.subheader("🛍️ Paso 1: Shopify")
-    st.markdown("**Carga el archivo exportado de Matrixify**")
-    matrixify_file = st.file_uploader("Subir Excel Matrixify", type=["xlsx"], key="mat")
+    st.info("📂 Paso 1: Archivo Matrixify (Shopify)")
+    matrixify_file = st.file_uploader("Sube el export de Matrixify", type=["xlsx"], key="mat")
 
 with col2:
-    # INTENTA CARGAR ICONO SI EXISTE, SI NO USA EMOJI
-    # st.image("cedi_icon.png", width=50) # Descomentar si tienes el archivo
-    st.subheader("🏭 Paso 2: CEDI")
-    st.markdown("**Carga el inventario del CEDI**")
-    cedi_file = st.file_uploader("Subir Excel CEDI", type=["xlsx"], key="cedi")
+    st.warning("🏭 Paso 2: Archivo CEDI")
+    cedi_file = st.file_uploader("Sube el inventario del CEDI", type=["xlsx"], key="cedi")
 
 # -------------------------------------------------
 # 4. PROCESAMIENTO
 # -------------------------------------------------
 if matrixify_file and cedi_file:
-    st.markdown("---")
     
-    # Botón grande para iniciar
-    if st.button("🚀 ANALIZAR Y ACTUALIZAR INVENTARIO"):
+    if st.button("🚀 AUDITAR Y PROCESAR INVENTARIO"):
         
-        # --- FASE 1: ANALIZANDO ---
-        with st.status("🔍 Procesando archivos...", expanded=True) as status:
+        with st.status("⚙️ Procesando datos...", expanded=True) as status:
             
-            st.write("📂 Leyendo archivo Matrixify...")
-            df_matrixify = pd.read_excel(matrixify_file, engine="openpyxl")
-            time.sleep(0.5) # Pequeña pausa para UX
-            
-            st.write("📂 Analizando estructura del CEDI...")
+            # --- CARGA Y LIMPIEZA ---
+            st.write("📖 Leyendo archivos...")
+            df_mat = pd.read_excel(matrixify_file, engine="openpyxl")
             df_cedi = cargar_cedi_inteligente(cedi_file, "Código Producto")
-            
-            if df_cedi is None:
-                status.update(label="❌ Error al leer CEDI", state="error")
-                st.stop()
 
-            # Limpieza de columnas
-            df_matrixify.columns = df_matrixify.columns.astype(str).str.strip()
+            # Normalizar nombres de columnas
+            df_mat.columns = df_mat.columns.astype(str).str.strip()
             df_cedi.columns = df_cedi.columns.astype(str).str.strip()
 
-            # Definición de Columnas
+            # Definir columnas clave
             col_sku_mat = "Variant SKU"
-            col_inv_mat = "Inventory Available: Ecommerce"
+            col_inv_mat = "Inventory Available: Ecommerce" # Columna destino
             col_sku_cedi = "Código Producto"
             
-            posibles_cant = ["Cant. Disponible", "Suma de Cant. Disponible", "Disponible", "Saldo"]
+            # Buscar columna de cantidad en CEDI
+            posibles_cant = ["Cant. Disponible", "Suma de Cant. Disponible", "Disponible", "Saldo", "Total"]
             col_cant_cedi = next((c for c in posibles_cant if c in df_cedi.columns), None)
 
-            # Validaciones
-            errores = []
-            if col_sku_mat not in df_matrixify.columns:
-                errores.append(f"Falta columna '{col_sku_mat}' en Matrixify")
-            if col_sku_cedi not in df_cedi.columns:
-                errores.append(f"Falta columna '{col_sku_cedi}' en CEDI")
             if not col_cant_cedi:
-                errores.append("No se encontró columna de cantidad en CEDI")
-
-            if errores:
-                for e in errores:
-                    st.error(f"❌ {e}")
-                status.update(label="❌ Error en validación", state="error")
+                status.update(label="❌ Error: No se encontró columna de cantidad en CEDI", state="error")
                 st.stop()
-            
-            st.write("✅ Estructura validada correctamente.")
-            
-            # --- FASE 2: ACTUALIZANDO ---
-            st.write("🔄 Cruzando bases de datos...")
-            
-            # Normalización
-            df_matrixify[col_sku_mat] = df_matrixify[col_sku_mat].astype(str).str.strip()
+
+            # Normalizar SKUs (texto y sin espacios)
+            df_mat[col_sku_mat] = df_mat[col_sku_mat].astype(str).str.strip()
             df_cedi[col_sku_cedi] = df_cedi[col_sku_cedi].astype(str).str.strip()
-            df_cedi[col_cant_cedi] = pd.to_numeric(df_cedi[col_cant_cedi], errors='coerce').fillna(0)
-
-            # Diccionario de Inventario CEDI
-            inventario_dict = df_cedi.groupby(col_sku_cedi)[col_cant_cedi].sum().to_dict()
-
-            # Contadores para reporte
-            total_skus = len(df_matrixify)
-            skus_encontrados = 0
-            skus_no_encontrados = 0
-            cambios_realizados = 0
-
-            # Lógica de Actualización
-            nuevos_valores = []
-            estados = []
-
-            for idx, row in df_matrixify.iterrows():
-                sku = row[col_sku_mat]
-                stock_actual_shopify = row.get(col_inv_mat, 0)
-                
-                if sku in inventario_dict:
-                    nuevo_stock = inventario_dict[sku]
-                    skus_encontrados += 1
-                else:
-                    nuevo_stock = 0 # OJO: Asume 0 si no está en CEDI
-                    skus_no_encontrados += 1
-                
-                # Detectar si hubo cambio real
-                if stock_actual_shopify != nuevo_stock:
-                    cambios_realizados += 1
-                    estados.append("Actualizado")
-                else:
-                    estados.append("Sin cambios")
-                
-                nuevos_valores.append(nuevo_stock)
-
-            # Asignar columna
-            df_matrixify[col_inv_mat] = nuevos_valores
             
-            status.update(label="✅ ¡Proceso completado!", state="complete", expanded=False)
+            # Normalizar Cantidades
+            df_cedi[col_cant_cedi] = pd.to_numeric(df_cedi[col_cant_cedi], errors='coerce').fillna(0)
+            
+            # Asegurar que la columna de inventario existe en Matrixify (si es archivo nuevo)
+            if col_inv_mat not in df_mat.columns:
+                df_mat[col_inv_mat] = 0
+            else:
+                df_mat[col_inv_mat] = pd.to_numeric(df_mat[col_inv_mat], errors='coerce').fillna(0)
+
+            # --- LÓGICA DE CRUCE Y AUDITORÍA ---
+            st.write("🔄 Cruzando referencias...")
+            
+            # Agrupar CEDI (Diccionario maestro)
+            inventario_cedi = df_cedi.groupby(col_sku_cedi)[col_cant_cedi].sum().to_dict()
+            
+            # Listas para el reporte detallado
+            reporte_audit = []
+            skus_procesados_shopify = set()
+
+            # Iterar sobre Shopify (Matrixify)
+            for idx, row in df_mat.iterrows():
+                sku = row[col_sku_mat]
+                stock_old = float(row[col_inv_mat])
+                skus_procesados_shopify.add(sku)
+                
+                # Buscar en CEDI
+                if sku in inventario_cedi:
+                    stock_new = float(inventario_cedi[sku])
+                    en_cedi = True
+                else:
+                    stock_new = 0.0
+                    en_cedi = False
+                
+                # Clasificación de Anomalía
+                tipo_cambio = "Sin Cambios"
+                
+                if not en_cedi:
+                    if stock_old > 0:
+                        tipo_cambio = "⚠️ Fantasma (En Shopify, No en CEDI)"
+                        # Acción: Se pone a 0
+                    else:
+                        tipo_cambio = "Sin Stock (Ambos 0)"
+                else:
+                    if stock_new == 0 and stock_old > 0:
+                        tipo_cambio = "🔴 Agotado (Stockout)"
+                    elif stock_new > stock_old:
+                        tipo_cambio = "📈 Subió Stock"
+                    elif stock_new < stock_old:
+                        tipo_cambio = "📉 Bajó Stock"
+                
+                # Guardar dato para reporte
+                reporte_audit.append({
+                    "SKU": sku,
+                    "Nombre": row.get("Title", "N/A"), # Intentar obtener nombre
+                    "Stock Anterior (Shopify)": stock_old,
+                    "Stock Nuevo (CEDI)": stock_new,
+                    "Diferencia": stock_new - stock_old,
+                    "Estado": tipo_cambio
+                })
+
+                # Actualizar el DataFrame original para la descarga de Matrixify
+                df_mat.at[idx, col_inv_mat] = stock_new
+
+            # --- BUSCAR SKUS QUE ESTÁN EN CEDI PERO NO EN SHOPIFY ---
+            todos_skus_cedi = set(inventario_cedi.keys())
+            skus_nuevos_en_cedi = todos_skus_cedi - skus_procesados_shopify
+            
+            for sku_nuevo in skus_nuevos_en_cedi:
+                 reporte_audit.append({
+                    "SKU": sku_nuevo,
+                    "Nombre": "Desconocido (Solo en CEDI)",
+                    "Stock Anterior (Shopify)": 0,
+                    "Stock Nuevo (CEDI)": inventario_cedi[sku_nuevo],
+                    "Diferencia": inventario_cedi[sku_nuevo],
+                    "Estado": "🆕 Nuevo en CEDI (No en Shopify)"
+                })
+
+            # Crear DataFrame de Auditoría
+            df_audit = pd.DataFrame(reporte_audit)
+            
+            status.update(label="✅ Análisis completado", state="complete", expanded=False)
 
         # -------------------------------------------------
-        # 5. RESULTADOS Y DESCARGA
+        # 5. DASHBOARD DE RESULTADOS
         # -------------------------------------------------
-        st.success("Inventario procesado exitosamente")
+        
+        # Filtrar DataFrames por estado
+        df_subieron = df_audit[df_audit["Estado"] == "📈 Subió Stock"]
+        df_bajaron = df_audit[df_audit["Estado"] == "📉 Bajó Stock"]
+        df_agotados = df_audit[df_audit["Estado"] == "🔴 Agotado (Stockout)"]
+        df_fantasmas = df_audit[df_audit["Estado"] == "⚠️ Fantasma (En Shopify, No en CEDI)"]
+        df_nuevos_cedi = df_audit[df_audit["Estado"] == "🆕 Nuevo en CEDI (No en Shopify)"]
 
-        # Métricas visuales
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric(label="🔄 Cambios Encontrados", value=cambios_realizados)
-        with m2:
-            st.metric(label="✅ SKUs Cruzados (CEDI)", value=skus_encontrados)
-        with m3:
-            st.metric(label="⚠️ Anomalías (No en CEDI)", value=skus_no_encontrados, delta_color="inverse")
+        # Métricas Generales
+        st.subheader("📊 Resumen de Impacto")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Stock Subió", f"{len(df_subieron)} SKUs", delta="Ingreso mercancía")
+        m2.metric("Stock Bajó", f"{len(df_bajaron)} SKUs", delta="-Ventas/Ajustes", delta_color="inverse")
+        m3.metric("Se Agotaron", f"{len(df_agotados)} SKUs", delta="Stockout crítico", delta_color="inverse")
+        m4.metric("No encontrados", f"{len(df_fantasmas)} SKUs", help="Están en Shopify con stock, pero no aparecen en el archivo CEDI")
 
-        if skus_no_encontrados > 0:
-            with st.expander("Ver lista de anomalías (SKUs en Shopify que no están en CEDI)"):
-                # Filtrar y mostrar los que no se encontraron (suponiendo que su nuevo stock es 0)
-                anomalias = df_matrixify[~df_matrixify[col_sku_mat].isin(inventario_dict.keys())]
-                st.dataframe(anomalias[[col_sku_mat, "Title"]].head(100))
-                st.caption("*Estos productos se ajustaron a 0 unidades.*")
+        # Pestañas de Detalle
+        st.markdown("### 🔎 Detalle por Categoría")
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Subieron", 
+            "📉 Bajaron", 
+            "🔴 Agotados", 
+            "⚠️ Fantasmas (Shopify)", 
+            "🆕 Nuevos (CEDI)"
+        ])
 
-        # Preparar archivo de descarga
+        with tab1:
+            st.dataframe(df_subieron, use_container_width=True)
+        
+        with tab2:
+            st.dataframe(df_bajaron, use_container_width=True)
+            
+        with tab3:
+            st.caption("Estos productos tenían inventario y ahora quedaron en 0.")
+            st.dataframe(df_agotados, use_container_width=True)
+            
+        with tab4:
+            st.error(f"⚠️ Hay {len(df_fantasmas)} productos que tienen stock en Shopify, pero NO aparecen en el CEDI. El sistema los ajustará a 0 para prevenir sobreventas.")
+            st.dataframe(df_fantasmas, use_container_width=True)
+            
+        with tab5:
+            st.info(f"🆕 Hay {len(df_nuevos_cedi)} productos en el CEDI que NO existen en tu archivo de Shopify. No se pueden cargar a Shopify hasta que crees el producto.")
+            st.dataframe(df_nuevos_cedi, use_container_width=True)
+
+        # -------------------------------------------------
+        # 6. DESCARGAS
+        # -------------------------------------------------
+        st.markdown("---")
+        st.subheader("📥 Descargar Archivos")
+
+        col_d1, col_d2 = st.columns(2)
+        
+        # Archivo 1: Matrixify (El funcional)
+        buffer_mat = BytesIO()
+        with pd.ExcelWriter(buffer_mat, engine="openpyxl") as writer:
+            df_mat.to_excel(writer, index=False)
+        
         fecha_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        nombre_archivo = f"Actualizacion_Inventario_Ecommerce_{fecha_str}.xlsx"
         
-        buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            df_matrixify.to_excel(writer, index=False)
-        
-        st.markdown("### 📥 Descargar Resultado")
-        st.download_button(
-            label=f"Descargar Excel: {nombre_archivo}",
-            data=buffer.getvalue(),
-            file_name=nombre_archivo,
+        col_d1.download_button(
+            label="⬇️ Archivo para Matrixify (Importar)",
+            data=buffer_mat.getvalue(),
+            file_name=f"Update_Inventario_Matrixify_{fecha_str}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary" 
+            type="primary",
+            help="Este es el archivo que debes subir a Matrixify app"
+        )
+
+        # Archivo 2: Auditoría (El reporte)
+        buffer_audit = BytesIO()
+        with pd.ExcelWriter(buffer_audit, engine="openpyxl") as writer:
+            df_audit.to_excel(writer, index=False)
+            
+        col_d2.download_button(
+            label="📊 Descargar Reporte de Auditoría (Excel)",
+            data=buffer_audit.getvalue(),
+            file_name=f"Reporte_Auditoria_Stocks_{fecha_str}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Excel con el detalle de qué subió, qué bajó y errores encontrados"
         )
 
 else:
-    # Mensaje inicial cuando está vacío
-    st.info("👋 Sube ambos archivos para activar el botón de procesamiento.")
+    # Mensaje de bienvenida
+    st.markdown("""
+    <div style="text-align: center; color: #666; padding: 50px;">
+        <h3>👋 Bienvenido al Gestor de Stock Clemont</h3>
+        <p>Por favor carga tus archivos arriba para comenzar el análisis.</p>
+    </div>
+    """, unsafe_allow_html=True)
