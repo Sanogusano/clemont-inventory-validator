@@ -8,13 +8,13 @@ import time
 # 1. CONFIGURACIÓN DE LA PÁGINA
 # -------------------------------------------------
 st.set_page_config(
-    page_title="Clemont Stock Manager Pro",
+    page_title="Stock Manager Pro",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Estilos CSS
+# Estilos CSS + Bloqueo de clic derecho
 st.markdown("""
     <style>
     .main { background-color: #f4f6f9; }
@@ -28,10 +28,78 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center;
     }
     div[data-testid="stMetricValue"] { font-size: 24px; }
+
+    /* Overlay de aviso clic derecho */
+    #rc-overlay {
+        display: none;
+        position: fixed;
+        z-index: 99999;
+        left: 0; top: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.55);
+        justify-content: center;
+        align-items: center;
+    }
+    #rc-overlay.show { display: flex; }
+    #rc-box {
+        background: #fff;
+        border-radius: 16px;
+        padding: 40px 50px;
+        text-align: center;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+        font-family: sans-serif;
+        animation: popIn .2s ease;
+    }
+    @keyframes popIn {
+        from { transform: scale(0.7); opacity: 0; }
+        to   { transform: scale(1);   opacity: 1; }
+    }
+    #rc-box .emoji { font-size: 52px; }
+    #rc-box p { font-size: 20px; font-weight: 700; margin: 12px 0 4px; color: #0f172a; }
+    #rc-box small { color: #64748b; font-size: 13px; }
     </style>
+
+    <!-- Overlay HTML -->
+    <div id="rc-overlay">
+      <div id="rc-box">
+        <div class="emoji">🚫🙅</div>
+        <p>Nononon, ¡no puedes hacer eso!</p>
+        <small>Este contenido está protegido. Haz clic para cerrar.</small>
+      </div>
+    </div>
+
+    <script>
+    (function() {
+        // Bloquear clic derecho
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            var overlay = document.getElementById('rc-overlay');
+            if (overlay) overlay.classList.add('show');
+        });
+
+        // Cerrar overlay al hacer clic
+        document.addEventListener('click', function() {
+            var overlay = document.getElementById('rc-overlay');
+            if (overlay) overlay.classList.remove('show');
+        });
+
+        // Bloquear atajos de teclado comunes (Ctrl+S, Ctrl+U, Ctrl+Shift+I, F12)
+        document.addEventListener('keydown', function(e) {
+            if (
+                (e.ctrlKey && (e.key === 's' || e.key === 'u' || e.key === 'S' || e.key === 'U')) ||
+                (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j')) ||
+                e.key === 'F12'
+            ) {
+                e.preventDefault();
+                var overlay = document.getElementById('rc-overlay');
+                if (overlay) overlay.classList.add('show');
+            }
+        });
+    })();
+    </script>
     """, unsafe_allow_html=True)
 
-st.title("📦 Clemont Stock Manager Pro")
+st.title("📦 Stock Manager Pro")
 st.caption("Auditoría y Sincronización: CEDI ➡️ Matrixify")
 
 # -------------------------------------------------
@@ -89,7 +157,7 @@ if matrixify_file and cedi_file:
 
             # Definir columnas clave
             col_sku_mat = "Variant SKU"
-            col_inv_mat = "Inventory Available: Ecommerce" # Columna destino
+            col_inv_mat = "Inventory Available: Ecommerce"
             col_sku_cedi = "Código Producto"
             
             # Buscar columna de cantidad en CEDI
@@ -107,7 +175,7 @@ if matrixify_file and cedi_file:
             # Normalizar Cantidades
             df_cedi[col_cant_cedi] = pd.to_numeric(df_cedi[col_cant_cedi], errors='coerce').fillna(0)
             
-            # Asegurar que la columna de inventario existe en Matrixify (si es archivo nuevo)
+            # Asegurar que la columna de inventario existe en Matrixify
             if col_inv_mat not in df_mat.columns:
                 df_mat[col_inv_mat] = 0
             else:
@@ -143,7 +211,6 @@ if matrixify_file and cedi_file:
                 if not en_cedi:
                     if stock_old > 0:
                         tipo_cambio = "⚠️ Fantasma (En Shopify, No en CEDI)"
-                        # Acción: Se pone a 0
                     else:
                         tipo_cambio = "Sin Stock (Ambos 0)"
                 else:
@@ -154,17 +221,15 @@ if matrixify_file and cedi_file:
                     elif stock_new < stock_old:
                         tipo_cambio = "📉 Bajó Stock"
                 
-                # Guardar dato para reporte
                 reporte_audit.append({
                     "SKU": sku,
-                    "Nombre": row.get("Title", "N/A"), # Intentar obtener nombre
+                    "Nombre": row.get("Title", "N/A"),
                     "Stock Anterior (Shopify)": stock_old,
                     "Stock Nuevo (CEDI)": stock_new,
                     "Diferencia": stock_new - stock_old,
                     "Estado": tipo_cambio
                 })
 
-                # Actualizar el DataFrame original para la descarga de Matrixify
                 df_mat.at[idx, col_inv_mat] = stock_new
 
             # --- BUSCAR SKUS QUE ESTÁN EN CEDI PERO NO EN SHOPIFY ---
@@ -181,7 +246,6 @@ if matrixify_file and cedi_file:
                     "Estado": "🆕 Nuevo en CEDI (No en Shopify)"
                 })
 
-            # Crear DataFrame de Auditoría
             df_audit = pd.DataFrame(reporte_audit)
             
             status.update(label="✅ Análisis completado", state="complete", expanded=False)
@@ -190,14 +254,12 @@ if matrixify_file and cedi_file:
         # 5. DASHBOARD DE RESULTADOS
         # -------------------------------------------------
         
-        # Filtrar DataFrames por estado
         df_subieron = df_audit[df_audit["Estado"] == "📈 Subió Stock"]
         df_bajaron = df_audit[df_audit["Estado"] == "📉 Bajó Stock"]
         df_agotados = df_audit[df_audit["Estado"] == "🔴 Agotado (Stockout)"]
         df_fantasmas = df_audit[df_audit["Estado"] == "⚠️ Fantasma (En Shopify, No en CEDI)"]
         df_nuevos_cedi = df_audit[df_audit["Estado"] == "🆕 Nuevo en CEDI (No en Shopify)"]
 
-        # Métricas Generales
         st.subheader("📊 Resumen de Impacto")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Stock Subió", f"{len(df_subieron)} SKUs", delta="Ingreso mercancía")
@@ -205,7 +267,6 @@ if matrixify_file and cedi_file:
         m3.metric("Se Agotaron", f"{len(df_agotados)} SKUs", delta="Stockout crítico", delta_color="inverse")
         m4.metric("No encontrados", f"{len(df_fantasmas)} SKUs", help="Están en Shopify con stock, pero no aparecen en el archivo CEDI")
 
-        # Pestañas de Detalle
         st.markdown("### 🔎 Detalle por Categoría")
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📈 Subieron", 
@@ -217,18 +278,14 @@ if matrixify_file and cedi_file:
 
         with tab1:
             st.dataframe(df_subieron, use_container_width=True)
-        
         with tab2:
             st.dataframe(df_bajaron, use_container_width=True)
-            
         with tab3:
             st.caption("Estos productos tenían inventario y ahora quedaron en 0.")
             st.dataframe(df_agotados, use_container_width=True)
-            
         with tab4:
             st.error(f"⚠️ Hay {len(df_fantasmas)} productos que tienen stock en Shopify, pero NO aparecen en el CEDI. El sistema los ajustará a 0 para prevenir sobreventas.")
             st.dataframe(df_fantasmas, use_container_width=True)
-            
         with tab5:
             st.info(f"🆕 Hay {len(df_nuevos_cedi)} productos en el CEDI que NO existen en tu archivo de Shopify. No se pueden cargar a Shopify hasta que crees el producto.")
             st.dataframe(df_nuevos_cedi, use_container_width=True)
@@ -241,7 +298,6 @@ if matrixify_file and cedi_file:
 
         col_d1, col_d2 = st.columns(2)
         
-        # Archivo 1: Matrixify (El funcional)
         buffer_mat = BytesIO()
         with pd.ExcelWriter(buffer_mat, engine="openpyxl") as writer:
             df_mat.to_excel(writer, index=False)
@@ -257,7 +313,6 @@ if matrixify_file and cedi_file:
             help="Este es el archivo que debes subir a Matrixify app"
         )
 
-        # Archivo 2: Auditoría (El reporte)
         buffer_audit = BytesIO()
         with pd.ExcelWriter(buffer_audit, engine="openpyxl") as writer:
             df_audit.to_excel(writer, index=False)
@@ -271,10 +326,19 @@ if matrixify_file and cedi_file:
         )
 
 else:
-    # Mensaje de bienvenida
     st.markdown("""
     <div style="text-align: center; color: #666; padding: 50px;">
-        <h3>👋 Bienvenido al Gestor de Stock Clemont</h3>
+        <h3>👋 Bienvenido al Gestor de Stock</h3>
         <p>Por favor carga tus archivos arriba para comenzar el análisis.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# -------------------------------------------------
+# 7. FOOTER
+# -------------------------------------------------
+st.markdown("---")
+st.markdown("""
+    <div style="text-align: center; color: #94a3b8; font-size: 13px; padding: 10px 0 20px;">
+        Desarrollado por <strong>Andrés Restrepo</strong> · Todos los derechos reservados © 2026
     </div>
     """, unsafe_allow_html=True)
